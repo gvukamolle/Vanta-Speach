@@ -6,10 +6,9 @@ struct RecordingView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var recorder: AudioRecorder
+    @EnvironmentObject var coordinator: RecordingCoordinator
 
     @State private var showRecordingSheet = false
-    @State private var selectedPreset: RecordingPreset?
-    @State private var currentRecordingURL: URL?
     @State private var showError = false
     @State private var errorMessage = ""
 
@@ -47,7 +46,7 @@ struct RecordingView: View {
             }
             .navigationTitle("Запись")
             .sheet(isPresented: $showRecordingSheet) {
-                if let preset = selectedPreset {
+                if let preset = coordinator.currentPreset {
                     ActiveRecordingSheet(preset: preset, onStop: stopRecording)
                 }
             }
@@ -113,9 +112,9 @@ struct RecordingView: View {
                         .monospacedDigit()
                 }
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .vantaGlassProminent(cornerRadius: 24)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+                .vantaGlassProminent(cornerRadius: 28)
             }
             .buttonStyle(.plain)
         } else {
@@ -183,12 +182,10 @@ struct RecordingView: View {
     // MARK: - Actions
 
     private func startRecordingWithPreset(_ preset: RecordingPreset) {
-        selectedPreset = preset
-
         Task {
             do {
-                currentRecordingURL = try await recorder.startRecording()
-                showRecordingSheet = true
+                try await coordinator.startRecording(preset: preset)
+                // Sheet не открываем автоматически - пользователь откроет через баннер при необходимости
             } catch {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -200,28 +197,7 @@ struct RecordingView: View {
         showRecordingSheet = false
 
         Task {
-            let result = await recorder.stopRecording(convertToOGG: true)
-
-            switch result {
-            case .success(let data):
-                let presetName = selectedPreset?.displayName ?? "Запись"
-                let title = "\(presetName) \(Date().formatted(date: .abbreviated, time: .shortened))"
-
-                let recording = Recording(
-                    title: title,
-                    duration: data.duration,
-                    audioFileURL: data.url.path,
-                    preset: selectedPreset
-                )
-
-                modelContext.insert(recording)
-                currentRecordingURL = nil
-                selectedPreset = nil
-
-            case .failure(let error):
-                errorMessage = error.localizedDescription
-                showError = true
-            }
+            _ = await coordinator.stopRecording()
         }
     }
 
@@ -333,6 +309,7 @@ struct AudioLevelView: View {
 
 #Preview {
     RecordingView()
-        .environmentObject(AudioRecorder())
+        .environmentObject(RecordingCoordinator.shared)
+        .environmentObject(RecordingCoordinator.shared.audioRecorder)
         .modelContainer(for: Recording.self, inMemory: true)
 }

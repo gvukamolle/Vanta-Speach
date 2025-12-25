@@ -7,16 +7,18 @@ import Combine
 final class PresetSettings: ObservableObject {
     static let shared = PresetSettings()
 
-    private let defaults = UserDefaults.standard
-    private let orderKey = "preset_order"
-    private let disabledKey = "disabled_presets"
+    private let defaults: UserDefaults
+    private let orderKey = AppGroupConstants.presetOrderKey
+    private let disabledKey = AppGroupConstants.disabledPresetsKey
+
+    private init() {
+        // Use App Group UserDefaults for sharing with Widget Extension
+        self.defaults = UserDefaults(suiteName: AppGroupConstants.suiteName) ?? .standard
+        loadSettings()
+    }
 
     @Published private(set) var orderedPresets: [RecordingPreset] = []
     @Published private(set) var disabledPresets: Set<RecordingPreset> = []
-
-    private init() {
-        loadSettings()
-    }
 
     // MARK: - Public API
 

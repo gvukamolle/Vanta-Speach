@@ -3,6 +3,8 @@ import SwiftData
 
 struct RecordingDetailView: View {
     @Bindable var recording: Recording
+    @EnvironmentObject var coordinator: RecordingCoordinator
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var player = AudioPlayer()
     @State private var isTranscribing = false
     @State private var showError = false
@@ -10,6 +12,8 @@ struct RecordingDetailView: View {
     @State private var showTranscriptionSheet = false
     @State private var showSummarySheet = false
     @State private var audioLoadFailed = false
+    @State private var showContinueRecordingSheet = false
+    @State private var showContinueConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -19,6 +23,11 @@ struct RecordingDetailView: View {
 
                 // Audio Player Card
                 playerCard
+
+                // Continue Recording Button
+                if !audioLoadFailed {
+                    continueRecordingButton
+                }
 
                 // Transcribe Button (if not transcribed)
                 if !recording.isTranscribed {
@@ -54,6 +63,21 @@ struct RecordingDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
+        }
+        .alert("Продолжить запись?", isPresented: $showContinueConfirmation) {
+            Button("Отмена", role: .cancel) {}
+            Button("Продолжить", role: .destructive) {
+                startContinueRecording()
+            }
+        } message: {
+            Text("Транскрипция и саммари будут удалены. После остановки записи аудио будет склеено в один файл и потребуется новая транскрипция.")
+        }
+        .sheet(isPresented: $showContinueRecordingSheet) {
+            if let preset = coordinator.currentPreset {
+                ActiveRecordingSheet(preset: preset, onStop: stopContinueRecording)
+                    .environmentObject(coordinator)
+                    .environmentObject(coordinator.audioRecorder)
+            }
         }
     }
 
@@ -217,6 +241,32 @@ struct RecordingDetailView: View {
         }
         .padding(20)
         .vantaGlassCard(cornerRadius: 28, shadowRadius: 0, tintOpacity: 0.15)
+    }
+
+    // MARK: - Continue Recording Button
+
+    private var continueRecordingButton: some View {
+        Button {
+            // Если есть транскрипция - показываем предупреждение
+            if recording.isTranscribed {
+                showContinueConfirmation = true
+            } else {
+                startContinueRecording()
+            }
+        } label: {
+            HStack {
+                Image(systemName: "mic.badge.plus")
+                Text("Продолжить запись")
+                    .fontWeight(.medium)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .disabled(coordinator.audioRecorder.isRecording)
     }
 
     // MARK: - Transcribe Button
@@ -404,6 +454,33 @@ struct RecordingDetailView: View {
 
     private func exportToFiles() {
         // TODO: Implement export to Files app
+    }
+
+    // MARK: - Continue Recording Actions
+
+    private func startContinueRecording() {
+        player.stop()
+
+        Task {
+            do {
+                try await coordinator.continueRecording(recording: recording)
+                showContinueRecordingSheet = true
+            } catch {
+                errorMessage = error.localizedDescription
+                showError = true
+            }
+        }
+    }
+
+    private func stopContinueRecording() {
+        showContinueRecordingSheet = false
+
+        Task {
+            if let updatedRecording = await coordinator.stopRecording() {
+                // Перезагружаем аудио с новым файлом
+                loadAudio()
+            }
+        }
     }
 }
 
@@ -601,5 +678,6 @@ struct ContentSheetView: View {
             """,
             isTranscribed: true
         ))
+        .environmentObject(RecordingCoordinator.shared)
     }
 }

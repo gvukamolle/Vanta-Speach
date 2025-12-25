@@ -390,12 +390,103 @@ extension AudioRecorder: AVAudioRecorderDelegate {
     }
 }
 
+// MARK: - Audio Merging
+
+extension AudioRecorder {
+    /// Склеивает два аудиофайла в один
+    /// - Parameters:
+    ///   - firstURL: URL первого аудиофайла
+    ///   - secondURL: URL второго аудиофайла (нового)
+    ///   - deleteSecond: Удалить ли второй файл после склейки
+    /// - Returns: URL склеенного файла (перезаписывает первый)
+    func mergeAudioFiles(firstURL: URL, secondURL: URL, deleteSecond: Bool = true) async throws -> (url: URL, duration: TimeInterval) {
+        let composition = AVMutableComposition()
+
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw AudioRecorderError.mergeFailed
+        }
+
+        // Загружаем первый файл
+        let firstAsset = AVURLAsset(url: firstURL)
+        let firstTracks = try await firstAsset.loadTracks(withMediaType: .audio)
+        guard let firstTrack = firstTracks.first else {
+            throw AudioRecorderError.mergeFailed
+        }
+        let firstDuration = try await firstAsset.load(.duration)
+
+        // Вставляем первый трек
+        try compositionTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: firstDuration),
+            of: firstTrack,
+            at: .zero
+        )
+
+        // Загружаем второй файл
+        let secondAsset = AVURLAsset(url: secondURL)
+        let secondTracks = try await secondAsset.loadTracks(withMediaType: .audio)
+        guard let secondTrack = secondTracks.first else {
+            throw AudioRecorderError.mergeFailed
+        }
+        let secondDuration = try await secondAsset.load(.duration)
+
+        // Вставляем второй трек после первого
+        try compositionTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: secondDuration),
+            of: secondTrack,
+            at: firstDuration
+        )
+
+        // Создаём временный файл для экспорта
+        let tempURL = recordingsDirectory.appendingPathComponent("temp_merged_\(Date().timeIntervalSince1970).m4a")
+
+        // Экспортируем
+        guard let exportSession = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw AudioRecorderError.mergeFailed
+        }
+
+        exportSession.outputURL = tempURL
+        exportSession.outputFileType = .m4a
+
+        await exportSession.export()
+
+        guard exportSession.status == .completed else {
+            if let error = exportSession.error {
+                print("[AudioRecorder] Export failed: \(error)")
+            }
+            throw AudioRecorderError.mergeFailed
+        }
+
+        // Удаляем оригинальный первый файл и переименовываем temp в него
+        try? fileManager.removeItem(at: firstURL)
+        try fileManager.moveItem(at: tempURL, to: firstURL)
+
+        // Удаляем второй файл если нужно
+        if deleteSecond {
+            try? fileManager.removeItem(at: secondURL)
+        }
+
+        // Вычисляем общую длительность
+        let totalDuration = CMTimeGetSeconds(firstDuration) + CMTimeGetSeconds(secondDuration)
+
+        print("[AudioRecorder] Merged audio files, total duration: \(totalDuration)s")
+
+        return (firstURL, totalDuration)
+    }
+}
+
 // MARK: - Errors
 
 enum AudioRecorderError: LocalizedError {
     case permissionDenied
     case recordingFailed
     case sessionConfigurationFailed
+    case mergeFailed
 
     var errorDescription: String? {
         switch self {
@@ -405,6 +496,8 @@ enum AudioRecorderError: LocalizedError {
             return "Не удалось начать запись."
         case .sessionConfigurationFailed:
             return "Не удалось настроить аудио сессию для записи."
+        case .mergeFailed:
+            return "Не удалось склеить аудиофайлы."
         }
     }
 }
