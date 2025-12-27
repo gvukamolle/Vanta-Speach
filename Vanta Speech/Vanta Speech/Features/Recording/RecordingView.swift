@@ -9,6 +9,9 @@ struct RecordingView: View {
     @EnvironmentObject var coordinator: RecordingCoordinator
 
     @State private var showRecordingSheet = false
+    @State private var showRealtimeRecordingSheet = false
+    @State private var showRealtimeWarning = false
+    @State private var pendingRealtimePreset: RecordingPreset?
     @State private var showError = false
     @State private var errorMessage = ""
 
@@ -50,10 +53,28 @@ struct RecordingView: View {
                     ActiveRecordingSheet(preset: preset, onStop: stopRecording)
                 }
             }
+            .sheet(isPresented: $showRealtimeRecordingSheet) {
+                if let preset = coordinator.currentPreset {
+                    RealtimeRecordingSheet(preset: preset, onStop: stopRealtimeRecording)
+                }
+            }
             .alert("Ошибка", isPresented: $showError) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage)
+            }
+            .alert("Real-time транскрипция", isPresented: $showRealtimeWarning) {
+                Button("Начать запись") {
+                    if let preset = pendingRealtimePreset {
+                        startRealtimeRecording(preset: preset)
+                    }
+                    pendingRealtimePreset = nil
+                }
+                Button("Отмена", role: .cancel) {
+                    pendingRealtimePreset = nil
+                }
+            } message: {
+                Text("В этом режиме не сворачивайте приложение. При сворачивании запись будет приостановлена.")
             }
         }
     }
@@ -62,17 +83,29 @@ struct RecordingView: View {
 
     private var activeRecordingBanner: some View {
         Button {
-            showRecordingSheet = true
+            if coordinator.isRealtimeMode {
+                showRealtimeRecordingSheet = true
+            } else {
+                showRecordingSheet = true
+            }
         } label: {
             HStack(spacing: 12) {
                 Circle()
-                    .fill(Color.pinkVibrant)
+                    .fill(coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant)
                     .frame(width: 10, height: 10)
                     .modifier(PulseAnimation())
 
-                Text("Идёт запись")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Идёт запись")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    if coordinator.isRealtimeMode {
+                        Text("Real-time транскрипция")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Spacer()
 
@@ -85,7 +118,7 @@ struct RecordingView: View {
                     .foregroundStyle(.secondary)
             }
             .padding()
-            .background(Color.pinkVibrant.opacity(0.15))
+            .background((coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant).opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
@@ -96,17 +129,21 @@ struct RecordingView: View {
     @ViewBuilder
     private var microphoneButton: some View {
         if recorder.isRecording {
-            // If recording - tapping opens the sheet
+            // If recording - tapping opens the appropriate sheet
             Button {
-                showRecordingSheet = true
+                if coordinator.isRealtimeMode {
+                    showRealtimeRecordingSheet = true
+                } else {
+                    showRecordingSheet = true
+                }
             } label: {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(Color.pinkVibrant)
+                        .fill(coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant)
                         .frame(width: 8, height: 8)
                         .modifier(PulseAnimation())
 
-                    Image(systemName: "waveform")
+                    Image(systemName: coordinator.isRealtimeMode ? "text.badge.plus" : "waveform")
 
                     Text(formatTime(recorder.recordingDuration))
                         .monospacedDigit()
@@ -118,74 +155,74 @@ struct RecordingView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // If not recording - show menu with presets (or direct record if only one)
-            if presetSettings.enabledPresets.count == 1, let singlePreset = presetSettings.enabledPresets.first {
-                // Only one preset enabled - start recording directly
-                Button {
-                    startRecordingWithPreset(singlePreset)
-                } label: {
-                    HStack(spacing: 8) {
-                        if recorder.isConverting {
-                            ProgressView()
-                                .tint(.primary)
-                        } else {
-                            Image(systemName: "mic.fill")
-                                .font(.title3)
-                        }
-
-                        Text("Записать")
-                            .font(.body)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 14)
-                    .vantaGlassProminent(cornerRadius: 28)
-                }
-                .buttonStyle(.plain)
-                .disabled(recorder.isConverting)
-            } else {
-                // Multiple presets - show menu
-                Menu {
-                    ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
+            // If not recording - show menu with presets and mode selection
+            Menu {
+                ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
+                    Menu {
                         Button {
-                            startRecordingWithPreset(preset)
+                            startRecordingWithPreset(preset, realtime: false)
                         } label: {
-                            Label(preset.displayName, systemImage: preset.icon)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        if recorder.isConverting {
-                            ProgressView()
-                                .tint(.primary)
-                        } else {
-                            Image(systemName: "mic.fill")
-                                .font(.title3)
+                            Label("Обычная запись", systemImage: "waveform")
                         }
 
-                        Text("Записать")
-                            .font(.body)
-                            .fontWeight(.semibold)
+                        Button {
+                            startRecordingWithPreset(preset, realtime: true)
+                        } label: {
+                            Label("Real-time транскрипция", systemImage: "text.badge.plus")
+                        }
+                    } label: {
+                        Label(preset.displayName, systemImage: preset.icon)
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 14)
-                    .vantaGlassProminent(cornerRadius: 28)
                 }
-                .buttonStyle(.plain)
-                .disabled(recorder.isConverting)
+            } label: {
+                HStack(spacing: 8) {
+                    if recorder.isConverting {
+                        ProgressView()
+                            .tint(.primary)
+                    } else {
+                        Image(systemName: "mic.fill")
+                            .font(.title3)
+                    }
+
+                    Text("Записать")
+                        .font(.body)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+                .vantaGlassProminent(cornerRadius: 28)
             }
+            .buttonStyle(.plain)
+            .disabled(recorder.isConverting)
         }
     }
 
     // MARK: - Actions
 
-    private func startRecordingWithPreset(_ preset: RecordingPreset) {
+    private func startRecordingWithPreset(_ preset: RecordingPreset, realtime: Bool = false) {
+        if realtime {
+            // Показываем предупреждение перед real-time записью
+            pendingRealtimePreset = preset
+            showRealtimeWarning = true
+        } else {
+            Task {
+                do {
+                    try await coordinator.startRecording(preset: preset)
+                    // Sheet не открываем автоматически - пользователь откроет через баннер при необходимости
+                } catch {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
+    }
+
+    private func startRealtimeRecording(preset: RecordingPreset) {
         Task {
             do {
-                try await coordinator.startRecording(preset: preset)
-                // Sheet не открываем автоматически - пользователь откроет через баннер при необходимости
+                try await coordinator.startRealtimeRecording(preset: preset)
+                showRealtimeRecordingSheet = true
             } catch {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -198,6 +235,16 @@ struct RecordingView: View {
 
         Task {
             _ = await coordinator.stopRecording()
+        }
+    }
+
+    private func stopRealtimeRecording() {
+        showRealtimeRecordingSheet = false
+
+        Task {
+            _ = await coordinator.stopRealtimeRecording()
+            // Автоматически запускаем саммаризацию
+            await coordinator.startRealtimeSummarization()
         }
     }
 

@@ -22,6 +22,36 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var isTranscribing = false
     @Published private(set) var isContinuingRecording = false
 
+    // MARK: - Realtime Mode State
+
+    @Published private(set) var isRealtimeMode = false
+    @Published private(set) var realtimeManager: RealtimeTranscriptionManager?
+    let realtimeSpeechRecognizer = RealtimeSpeechRecognizer()
+
+    /// Длительность записи для текущего режима
+    var currentRecordingDuration: TimeInterval {
+        if isRealtimeMode {
+            return realtimeSpeechRecognizer.recordingDuration
+        }
+        return audioRecorder.recordingDuration
+    }
+
+    /// Уровень аудио для текущего режима
+    var currentAudioLevel: Float {
+        if isRealtimeMode {
+            return realtimeSpeechRecognizer.audioLevel
+        }
+        return audioRecorder.audioLevel
+    }
+
+    /// Приостановлена ли запись для текущего режима
+    var isCurrentRecordingInterrupted: Bool {
+        if isRealtimeMode {
+            return realtimeSpeechRecognizer.isInterrupted
+        }
+        return audioRecorder.isInterrupted
+    }
+
     private var cancellables = Set<AnyCancellable>()
     private weak var modelContext: ModelContext?
     private var didCheckPendingShortcut = false
@@ -137,23 +167,37 @@ final class RecordingCoordinator: ObservableObject {
 
     /// Поставить запись на паузу
     func pauseRecording() {
-        audioRecorder.pauseRecording()
-
-        Task {
-            await liveActivityManager.updatePaused(duration: audioRecorder.recordingDuration)
+        if isRealtimeMode {
+            realtimeSpeechRecognizer.pauseRecording()
+            Task {
+                await liveActivityManager.updatePaused(duration: realtimeSpeechRecognizer.recordingDuration)
+            }
+        } else {
+            audioRecorder.pauseRecording()
+            Task {
+                await liveActivityManager.updatePaused(duration: audioRecorder.recordingDuration)
+            }
         }
     }
 
     /// Возобновить запись
     func resumeRecording() {
-        audioRecorder.resumeRecording()
-
-        // Явно обновляем Live Activity сразу после возобновления
-        Task {
-            await liveActivityManager.updateRecording(
-                duration: audioRecorder.recordingDuration,
-                audioLevel: audioRecorder.audioLevel
-            )
+        if isRealtimeMode {
+            realtimeSpeechRecognizer.resumeRecording()
+            Task {
+                await liveActivityManager.updateRecording(
+                    duration: realtimeSpeechRecognizer.recordingDuration,
+                    audioLevel: realtimeSpeechRecognizer.audioLevel
+                )
+            }
+        } else {
+            audioRecorder.resumeRecording()
+            Task {
+                await liveActivityManager.updateRecording(
+                    duration: audioRecorder.recordingDuration,
+                    audioLevel: audioRecorder.audioLevel
+                )
+            }
         }
     }
 
@@ -266,6 +310,151 @@ final class RecordingCoordinator: ObservableObject {
             currentPreset = nil
             currentRecordingId = nil
             return nil
+        }
+    }
+
+    // MARK: - Realtime Recording Flow
+
+    /// Начать запись в real-time режиме с локальной диктовкой
+    func startRealtimeRecording(preset: RecordingPreset) async throws {
+        currentPreset = preset
+        currentRecordingId = UUID()
+        isRealtimeMode = true
+
+        // Инициализируем менеджер транскрипции
+        let manager = RealtimeTranscriptionManager()
+        realtimeManager = manager
+
+        // Настраиваем callback для завершения фразы
+        // Когда SpeechRecognizer определяет паузу 3 сек — отправляем чанк на сервер
+        realtimeSpeechRecognizer.onPhraseCompleted = { [weak manager] url, duration, previewText in
+            Task { @MainActor in
+                manager?.enqueueChunk(url: url, duration: duration, previewText: previewText)
+            }
+        }
+
+        // Начинаем запись с локальной диктовкой
+        try await realtimeSpeechRecognizer.startRecording()
+
+        // Подписываемся на обновления от SpeechRecognizer (без Live Activity в real-time режиме)
+        setupRealtimeSpeechObservers()
+
+        print("[RecordingCoordinator] Realtime recording started with preset: \(preset.displayName)")
+    }
+
+    /// Настройка обновлений от SpeechRecognizer
+    private func setupRealtimeSpeechObservers() {
+        // Синхронизируем interimText с менеджером
+        realtimeSpeechRecognizer.$interimText
+            .sink { [weak self] text in
+                self?.realtimeManager?.currentInterimText = text
+            }
+            .store(in: &cancellables)
+
+        // Пробрасываем обновления от менеджера в координатор для обновления UI
+        if let manager = realtimeManager {
+            manager.objectWillChange
+                .sink { [weak self] _ in
+                    self?.objectWillChange.send()
+                }
+                .store(in: &cancellables)
+        }
+    }
+
+    /// Остановить real-time запись и создать запись
+    func stopRealtimeRecording() async -> Recording? {
+        guard let preset = currentPreset,
+              let recordingId = currentRecordingId,
+              let manager = realtimeManager else { return nil }
+
+        // Останавливаем запись и локальную диктовку
+        let duration = realtimeSpeechRecognizer.stopRecording()
+
+        // Ждём завершения всех pending транскрипций
+        await manager.waitForCompletion()
+
+        // Получаем финальную транскрипцию
+        let finalTranscription = manager.getFinalTranscription()
+
+        // Создаём запись (без audioFileURL, так как real-time не сохраняет полный файл)
+        let recording = Recording(
+            id: recordingId,
+            title: "\(preset.displayName) \(formatDate(Date()))",
+            duration: duration,
+            audioFileURL: "",  // Real-time режим не сохраняет полный аудиофайл
+            transcriptionText: finalTranscription,
+            preset: preset
+        )
+        recording.isTranscribed = !finalTranscription.isEmpty
+
+        modelContext?.insert(recording)
+        try? modelContext?.save()
+
+        // Сохраняем pending для саммаризации
+        if !finalTranscription.isEmpty {
+            pendingTranscription = PendingTranscription(
+                recordingId: recordingId,
+                audioURL: URL(fileURLWithPath: ""),  // Не используется для real-time
+                duration: duration,
+                preset: preset
+            )
+        }
+
+        // Очищаем состояние
+        realtimeSpeechRecognizer.onPhraseCompleted = nil
+        isRealtimeMode = false
+        currentPreset = nil
+        currentRecordingId = nil
+
+        print("[RecordingCoordinator] Realtime recording stopped, paragraphs: \(manager.completedParagraphsCount)")
+
+        return recording
+    }
+
+    /// Начать саммаризацию для real-time записи
+    func startRealtimeSummarization() async {
+        guard let pending = pendingTranscription,
+              let manager = realtimeManager else { return }
+
+        isTranscribing = true
+
+        do {
+            let service = TranscriptionService()
+            let transcriptionText = manager.getFinalTranscription()
+
+            guard !transcriptionText.isEmpty else {
+                print("[RecordingCoordinator] No transcription text to summarize")
+                isTranscribing = false
+                realtimeManager = nil
+                pendingTranscription = nil
+                return
+            }
+
+            // Генерируем саммари из накопленной транскрипции
+            let (summary, title) = try await service.summarize(
+                text: transcriptionText,
+                preset: pending.preset
+            )
+
+            // Обновляем запись
+            await updateRecording(
+                id: pending.recordingId,
+                transcription: transcriptionText,
+                summary: summary,
+                title: title
+            )
+
+            realtimeManager = nil
+            pendingTranscription = nil
+            isTranscribing = false
+
+            print("[RecordingCoordinator] Realtime summarization completed")
+
+        } catch {
+            print("[RecordingCoordinator] Realtime summarization failed: \(error)")
+            realtimeManager = nil
+            pendingTranscription = nil
+            isTranscribing = false
         }
     }
 

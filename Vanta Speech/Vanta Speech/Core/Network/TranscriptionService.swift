@@ -83,6 +83,22 @@ actor TranscriptionService {
         return TranscriptionResult(transcription: transcription, summary: summary, generatedTitle: generatedTitle)
     }
 
+    // MARK: - Realtime Transcription API
+
+    /// Транскрибировать аудио без генерации саммари
+    /// Используется для real-time режима, где саммари генерируется в конце
+    func transcribeOnly(audioFileURL: URL) async throws -> String {
+        return try await transcribeAudio(fileURL: audioFileURL)
+    }
+
+    /// Сгенерировать саммари и заголовок для готового текста
+    /// Используется в конце real-time сессии
+    func summarize(text: String, preset: RecordingPreset) async throws -> (summary: String, title: String?) {
+        let summary = try await generateSummary(text: text, preset: preset)
+        let title = try? await generateTitle(from: summary)
+        return (summary, title)
+    }
+
     // MARK: - Whisper Transcription
 
     private func transcribeAudio(fileURL: URL) async throws -> String {

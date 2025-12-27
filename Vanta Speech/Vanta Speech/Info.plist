@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Приложению требуется доступ к микрофону для записи аудио.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Приложению требуется доступ к распознаванию речи для real-time транскрипции.</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>ru.poscredit.Vanta-Speech.background-processing</string>

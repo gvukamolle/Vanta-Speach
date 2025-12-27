@@ -13,6 +13,30 @@ final class AudioRecorder: NSObject, ObservableObject {
     @Published var audioLevel: Float = 0
     @Published var isInterrupted = false
 
+    // MARK: - Realtime Mode Properties
+
+    @Published var isRealtimeMode = false
+
+    /// Callback вызывается когда чанк готов для транскрипции
+    var onChunkReady: ((URL, TimeInterval) -> Void)?
+
+    /// Конфигурация VAD (Voice Activity Detection)
+    var vadConfig: VADConfig {
+        VADConfig(
+            silenceThreshold: UserDefaults.standard.float(forKey: "vad_silenceThreshold").nonZeroOr(0.08),
+            silenceDurationThreshold: UserDefaults.standard.double(forKey: "vad_silenceDuration").nonZeroOr(1.5),
+            minimumChunkDuration: UserDefaults.standard.double(forKey: "vad_minChunkDuration").nonZeroOr(10.0),
+            maximumChunkDuration: UserDefaults.standard.double(forKey: "vad_maxChunkDuration").nonZeroOr(60.0)
+        )
+    }
+
+    private var silenceDuration: TimeInterval = 0
+    private var currentChunkDuration: TimeInterval = 0
+    private var chunkIndex = 0
+    private var currentChunkURL: URL?
+    private var chunkStartTime: Date?
+    private var isFinalizingChunk = false
+
     private var audioRecorder: AVAudioRecorder?
     private var timer: Timer?
     private var startTime: Date?
@@ -337,12 +361,185 @@ final class AudioRecorder: NSObject, ObservableObject {
         print("[AudioRecorder] Recording resumed")
     }
 
+    // MARK: - Realtime Recording
+
+    /// Директория для временных чанков
+    var chunksDirectory: URL {
+        let chunksPath = recordingsDirectory.appendingPathComponent("Chunks", isDirectory: true)
+        if !fileManager.fileExists(atPath: chunksPath.path) {
+            try? fileManager.createDirectory(at: chunksPath, withIntermediateDirectories: true)
+        }
+        return chunksPath
+    }
+
+    /// Начать запись в real-time режиме с VAD
+    func startRealtimeRecording() async throws -> URL {
+        guard await requestPermission() else {
+            throw AudioRecorderError.permissionDenied
+        }
+
+        // Configure session for recording
+        try configureAudioSession()
+
+        // Очищаем старые чанки
+        clearChunksDirectory()
+
+        // Reset realtime state
+        isRealtimeMode = true
+        chunkIndex = 0
+        silenceDuration = 0
+        currentChunkDuration = 0
+        isFinalizingChunk = false
+
+        // Создаём первый чанк
+        let chunkURL = try createNewChunkFile()
+        currentChunkURL = chunkURL
+
+        // Audio settings (same as regular recording)
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100.0,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 64000,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        audioRecorder = try AVAudioRecorder(url: chunkURL, settings: settings)
+        audioRecorder?.isMeteringEnabled = true
+        audioRecorder?.delegate = self
+        audioRecorder?.record()
+
+        isRecording = true
+        isInterrupted = false
+        startTime = Date()
+        chunkStartTime = Date()
+        pausedDuration = 0
+        startTimer()
+
+        print("[AudioRecorder] Realtime recording started: \(chunkURL.lastPathComponent)")
+
+        return chunkURL
+    }
+
+    /// Остановить real-time запись
+    func stopRealtimeRecording() -> (finalChunkURL: URL?, totalDuration: TimeInterval) {
+        guard isRecording, isRealtimeMode else {
+            return (nil, 0)
+        }
+
+        let totalDuration = recordingDuration
+
+        // Финализируем последний чанк если он достаточно длинный
+        if let chunkURL = currentChunkURL, currentChunkDuration >= 2.0 {
+            audioRecorder?.stop()
+            print("[AudioRecorder] Final chunk saved: \(chunkURL.lastPathComponent), duration: \(currentChunkDuration)s")
+            onChunkReady?(chunkURL, currentChunkDuration)
+        } else {
+            audioRecorder?.stop()
+            // Удаляем слишком короткий последний чанк
+            if let chunkURL = currentChunkURL {
+                try? fileManager.removeItem(at: chunkURL)
+            }
+        }
+
+        stopTimer()
+        deactivateAudioSession()
+
+        // Reset state
+        isRecording = false
+        isRealtimeMode = false
+        isInterrupted = false
+        recordingDuration = 0
+        audioRecorder = nil
+        startTime = nil
+        currentChunkURL = nil
+        chunkStartTime = nil
+        silenceDuration = 0
+        currentChunkDuration = 0
+
+        print("[AudioRecorder] Realtime recording stopped, total duration: \(totalDuration)s")
+
+        return (currentChunkURL, totalDuration)
+    }
+
+    /// Создать новый файл для чанка
+    private func createNewChunkFile() throws -> URL {
+        let fileName = "chunk_\(chunkIndex)_\(Date().timeIntervalSince1970).m4a"
+        chunkIndex += 1
+        return chunksDirectory.appendingPathComponent(fileName)
+    }
+
+    /// Финализировать текущий чанк и начать новый
+    private func finalizeCurrentChunk() {
+        guard isRealtimeMode,
+              !isFinalizingChunk,
+              let chunkURL = currentChunkURL,
+              currentChunkDuration >= vadConfig.minimumChunkDuration else {
+            return
+        }
+
+        isFinalizingChunk = true
+
+        // Останавливаем текущую запись
+        audioRecorder?.stop()
+
+        let chunkDuration = currentChunkDuration
+        print("[AudioRecorder] Chunk finalized: \(chunkURL.lastPathComponent), duration: \(chunkDuration)s")
+
+        // Уведомляем о готовности чанка
+        onChunkReady?(chunkURL, chunkDuration)
+
+        // Начинаем новый чанк
+        do {
+            let newChunkURL = try createNewChunkFile()
+            currentChunkURL = newChunkURL
+
+            let settings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44100.0,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 64000,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+
+            audioRecorder = try AVAudioRecorder(url: newChunkURL, settings: settings)
+            audioRecorder?.isMeteringEnabled = true
+            audioRecorder?.delegate = self
+            audioRecorder?.record()
+
+            chunkStartTime = Date()
+            currentChunkDuration = 0
+            silenceDuration = 0
+
+            print("[AudioRecorder] New chunk started: \(newChunkURL.lastPathComponent)")
+        } catch {
+            print("[AudioRecorder] Failed to start new chunk: \(error)")
+        }
+
+        isFinalizingChunk = false
+    }
+
+    /// Очистить директорию чанков
+    func clearChunksDirectory() {
+        let chunksDir = chunksDirectory
+        if let contents = try? fileManager.contentsOfDirectory(at: chunksDir, includingPropertiesForKeys: nil) {
+            for file in contents {
+                try? fileManager.removeItem(at: file)
+            }
+        }
+    }
+
     // MARK: - Timer
 
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.updateMetrics()
+                guard let self = self else { return }
+                if self.isRealtimeMode {
+                    self.updateMetricsWithVAD()
+                } else {
+                    self.updateMetrics()
+                }
             }
         }
         // Keep timer running in common run loop mode for scrolling compatibility
@@ -364,6 +561,41 @@ final class AudioRecorder: NSObject, ObservableObject {
         if let power = audioRecorder?.averagePower(forChannel: 0) {
             let normalizedPower = max(0, (power + 60) / 60)
             audioLevel = normalizedPower
+        }
+    }
+
+    /// Обновление метрик с VAD логикой для real-time режима
+    private func updateMetricsWithVAD() {
+        guard let startTime = startTime, !isInterrupted else { return }
+        recordingDuration = Date().timeIntervalSince(startTime)
+
+        audioRecorder?.updateMeters()
+        guard let power = audioRecorder?.averagePower(forChannel: 0) else { return }
+
+        let normalizedPower = max(0, (power + 60) / 60)
+        audioLevel = normalizedPower
+
+        let config = vadConfig
+
+        // VAD логика
+        if normalizedPower < config.silenceThreshold {
+            // Тишина
+            silenceDuration += 0.1
+
+            // Проверяем условия для завершения чанка
+            if silenceDuration >= config.silenceDurationThreshold,
+               currentChunkDuration >= config.minimumChunkDuration {
+                finalizeCurrentChunk()
+            }
+        } else {
+            // Речь - сбрасываем счётчик тишины
+            silenceDuration = 0
+            currentChunkDuration += 0.1
+        }
+
+        // Принудительная отсечка по максимальной длине
+        if currentChunkDuration >= config.maximumChunkDuration {
+            finalizeCurrentChunk()
         }
     }
 }
@@ -487,6 +719,7 @@ enum AudioRecorderError: LocalizedError {
     case recordingFailed
     case sessionConfigurationFailed
     case mergeFailed
+    case chunkCreationFailed
 
     var errorDescription: String? {
         switch self {
@@ -498,6 +731,38 @@ enum AudioRecorderError: LocalizedError {
             return "Не удалось настроить аудио сессию для записи."
         case .mergeFailed:
             return "Не удалось склеить аудиофайлы."
+        case .chunkCreationFailed:
+            return "Не удалось создать аудио-чанк."
         }
+    }
+}
+
+// MARK: - VAD Configuration
+
+struct VADConfig {
+    /// Порог тишины (нормализованный 0-1). audioLevel ниже этого = тишина
+    var silenceThreshold: Float = 0.08  // ~-55dB
+
+    /// Длительность тишины для завершения чанка (секунды)
+    var silenceDurationThreshold: TimeInterval = 1.5
+
+    /// Минимальная длина чанка с речью (секунды)
+    var minimumChunkDuration: TimeInterval = 10.0
+
+    /// Максимальная длина чанка (секунды) - принудительная отсечка
+    var maximumChunkDuration: TimeInterval = 60.0
+}
+
+// MARK: - Helper Extensions
+
+private extension Float {
+    func nonZeroOr(_ defaultValue: Float) -> Float {
+        self > 0 ? self : defaultValue
+    }
+}
+
+private extension Double {
+    func nonZeroOr(_ defaultValue: Double) -> Double {
+        self > 0 ? self : defaultValue
     }
 }

@@ -55,10 +55,21 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    NavigationLink {
+                        RealtimeModeSettingsView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "text.badge.plus")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+                            Text("Real-time транскрипция")
+                        }
+                    }
                 } header: {
                     Text("Запись")
                 } footer: {
-                    Text("Настройте порядок и доступность типов встреч в меню записи")
+                    Text("Real-time режим показывает транскрипцию в реальном времени, но работает только при активном приложении.")
                 }
 
                 Section("Оформление") {

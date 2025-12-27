@@ -14,6 +14,9 @@ struct iPadRecordingContentView: View {
     @StateObject private var presetSettings = PresetSettings.shared
 
     @State private var showRecordingSheet = false
+    @State private var showRealtimeRecordingSheet = false
+    @State private var showRealtimeWarning = false
+    @State private var pendingRealtimePreset: RecordingPreset?
     @State private var showError = false
     @State private var errorMessage = ""
 
@@ -49,10 +52,28 @@ struct iPadRecordingContentView: View {
                 ActiveRecordingSheet(preset: preset, onStop: stopRecording)
             }
         }
+        .sheet(isPresented: $showRealtimeRecordingSheet) {
+            if let preset = coordinator.currentPreset {
+                RealtimeRecordingSheet(preset: preset, onStop: stopRealtimeRecording)
+            }
+        }
         .alert("Ошибка", isPresented: $showError) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
+        }
+        .alert("Real-time транскрипция", isPresented: $showRealtimeWarning) {
+            Button("Начать запись") {
+                if let preset = pendingRealtimePreset {
+                    startRealtimeRecording(preset: preset)
+                }
+                pendingRealtimePreset = nil
+            }
+            Button("Отмена", role: .cancel) {
+                pendingRealtimePreset = nil
+            }
+        } message: {
+            Text("В этом режиме не сворачивайте приложение. При сворачивании запись будет приостановлена.")
         }
     }
 
@@ -68,7 +89,7 @@ struct iPadRecordingContentView: View {
                 Spacer()
 
                 // Active recording indicator
-                if recorder.isRecording {
+                if recorder.isRecording || coordinator.isRealtimeMode {
                     activeRecordingView
                 }
 
@@ -84,7 +105,9 @@ struct iPadRecordingContentView: View {
     private var activeRecordingView: some View {
         VStack(spacing: 24) {
             // Waveform visualizer
-            FrequencyVisualizerView(level: recorder.audioLevel)
+            FrequencyVisualizerView(level: coordinator.isRealtimeMode
+                ? coordinator.realtimeSpeechRecognizer.audioLevel
+                : recorder.audioLevel)
                 .frame(height: 120)
                 .padding(.horizontal)
 
@@ -92,7 +115,7 @@ struct iPadRecordingContentView: View {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(Color.pinkVibrant)
+                        .fill(coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant)
                         .frame(width: 12, height: 12)
                         .modifier(PulseAnimation())
 
@@ -101,7 +124,15 @@ struct iPadRecordingContentView: View {
                         .fontWeight(.medium)
                 }
 
-                Text(formatTime(recorder.recordingDuration))
+                if coordinator.isRealtimeMode {
+                    Text("Real-time транскрипция")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(formatTime(coordinator.isRealtimeMode
+                    ? coordinator.realtimeSpeechRecognizer.recordingDuration
+                    : recorder.recordingDuration))
                     .font(.system(size: 48, weight: .light, design: .monospaced))
                     .foregroundStyle(.primary)
 
@@ -132,21 +163,27 @@ struct iPadRecordingContentView: View {
 
     @ViewBuilder
     private var microphoneButton: some View {
-        if recorder.isRecording {
-            // If recording - tapping opens the sheet
+        if recorder.isRecording || coordinator.isRealtimeMode {
+            // If recording - tapping opens the appropriate sheet
             Button {
-                showRecordingSheet = true
+                if coordinator.isRealtimeMode {
+                    showRealtimeRecordingSheet = true
+                } else {
+                    showRecordingSheet = true
+                }
             } label: {
                 HStack(spacing: 12) {
                     Circle()
-                        .fill(Color.pinkVibrant)
+                        .fill(coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant)
                         .frame(width: 10, height: 10)
                         .modifier(PulseAnimation())
 
-                    Image(systemName: "waveform")
+                    Image(systemName: coordinator.isRealtimeMode ? "text.badge.plus" : "waveform")
                         .font(.title2)
 
-                    Text(formatTime(recorder.recordingDuration))
+                    Text(formatTime(coordinator.isRealtimeMode
+                        ? coordinator.realtimeSpeechRecognizer.recordingDuration
+                        : recorder.recordingDuration))
                         .font(.title3)
                         .monospacedDigit()
                 }
@@ -157,30 +194,30 @@ struct iPadRecordingContentView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // If not recording - show menu with presets
-            if presetSettings.enabledPresets.count == 1, let singlePreset = presetSettings.enabledPresets.first {
-                Button {
-                    startRecordingWithPreset(singlePreset)
-                } label: {
-                    recordButtonLabel
-                }
-                .buttonStyle(.plain)
-                .disabled(recorder.isConverting)
-            } else {
-                Menu {
-                    ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
+            // If not recording - show menu with presets and mode selection
+            Menu {
+                ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
+                    Menu {
                         Button {
-                            startRecordingWithPreset(preset)
+                            startRecordingWithPreset(preset, realtime: false)
                         } label: {
-                            Label(preset.displayName, systemImage: preset.icon)
+                            Label("Обычная запись", systemImage: "waveform")
                         }
+
+                        Button {
+                            startRecordingWithPreset(preset, realtime: true)
+                        } label: {
+                            Label("Real-time транскрипция", systemImage: "text.badge.plus")
+                        }
+                    } label: {
+                        Label(preset.displayName, systemImage: preset.icon)
                     }
-                } label: {
-                    recordButtonLabel
                 }
-                .buttonStyle(.plain)
-                .disabled(recorder.isConverting)
+            } label: {
+                recordButtonLabel
             }
+            .buttonStyle(.plain)
+            .disabled(recorder.isConverting)
         }
     }
 
@@ -293,10 +330,28 @@ struct iPadRecordingContentView: View {
 
     // MARK: - Actions
 
-    private func startRecordingWithPreset(_ preset: RecordingPreset) {
+    private func startRecordingWithPreset(_ preset: RecordingPreset, realtime: Bool = false) {
+        if realtime {
+            // Показываем предупреждение перед real-time записью
+            pendingRealtimePreset = preset
+            showRealtimeWarning = true
+        } else {
+            Task {
+                do {
+                    try await coordinator.startRecording(preset: preset)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
+    }
+
+    private func startRealtimeRecording(preset: RecordingPreset) {
         Task {
             do {
-                try await coordinator.startRecording(preset: preset)
+                try await coordinator.startRealtimeRecording(preset: preset)
+                showRealtimeRecordingSheet = true
             } catch {
                 errorMessage = error.localizedDescription
                 showError = true
@@ -309,6 +364,16 @@ struct iPadRecordingContentView: View {
 
         Task {
             _ = await coordinator.stopRecording()
+        }
+    }
+
+    private func stopRealtimeRecording() {
+        showRealtimeRecordingSheet = false
+
+        Task {
+            _ = await coordinator.stopRealtimeRecording()
+            // Автоматически запускаем саммаризацию
+            await coordinator.startRealtimeSummarization()
         }
     }
 

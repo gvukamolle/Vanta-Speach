@@ -1,0 +1,406 @@
+import AVFoundation
+import Speech
+import Combine
+
+/// Распознаватель речи в реальном времени с локальной диктовкой
+/// Использует SFSpeechRecognizer для предпревью и определения пауз
+@MainActor
+final class RealtimeSpeechRecognizer: NSObject, ObservableObject {
+
+    // MARK: - Published Properties
+
+    /// Текущий промежуточный текст от локальной диктовки
+    @Published private(set) var interimText: String = ""
+
+    /// Идет ли запись
+    @Published private(set) var isRecording = false
+
+    /// Уровень аудио для визуализации
+    @Published private(set) var audioLevel: Float = 0
+
+    /// Общая длительность записи
+    @Published private(set) var recordingDuration: TimeInterval = 0
+
+    /// Приостановлена ли запись
+    @Published private(set) var isInterrupted = false
+
+    // MARK: - Callbacks
+
+    /// Вызывается когда фраза завершена (пауза в речи)
+    /// Параметры: URL аудиофайла, длительность, предварительный текст диктовки
+    var onPhraseCompleted: ((URL, TimeInterval, String) -> Void)?
+
+    // MARK: - Private Properties
+
+    private let speechRecognizer: SFSpeechRecognizer?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private let audioEngine = AVAudioEngine()
+
+    private var audioFile: AVAudioFile?
+    private var currentChunkURL: URL?
+    private var chunkIndex = 0
+
+    private var startTime: Date?
+    private var phraseStartTime: Date?
+    private var lastSpeechTime: Date?
+    private var currentPhraseText: String = ""
+
+    private var pauseTimer: Timer?
+    private var metricsTimer: Timer?
+
+    private let fileManager = FileManager.default
+
+    /// Длительность паузы для завершения фразы (секунды)
+    private let pauseThreshold: TimeInterval = 3.0
+
+    // MARK: - Directories
+
+    var recordingsDirectory: URL {
+        let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsPath = documentsPath.appendingPathComponent("Recordings", isDirectory: true)
+        if !fileManager.fileExists(atPath: recordingsPath.path) {
+            try? fileManager.createDirectory(at: recordingsPath, withIntermediateDirectories: true)
+        }
+        return recordingsPath
+    }
+
+    var chunksDirectory: URL {
+        let chunksPath = recordingsDirectory.appendingPathComponent("Chunks", isDirectory: true)
+        if !fileManager.fileExists(atPath: chunksPath.path) {
+            try? fileManager.createDirectory(at: chunksPath, withIntermediateDirectories: true)
+        }
+        return chunksPath
+    }
+
+    // MARK: - Init
+
+    override init() {
+        self.speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
+        super.init()
+    }
+
+    // MARK: - Permissions
+
+    func requestPermissions() async -> Bool {
+        // Request microphone permission
+        let micPermission = await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+
+        guard micPermission else { return false }
+
+        // Request speech recognition permission
+        let speechPermission = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+
+        return speechPermission
+    }
+
+    // MARK: - Recording Control
+
+    func startRecording() async throws {
+        guard await requestPermissions() else {
+            throw SpeechRecognizerError.permissionDenied
+        }
+
+        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+            throw SpeechRecognizerError.recognizerUnavailable
+        }
+
+        // Очищаем старые чанки
+        clearChunksDirectory()
+
+        // Configure audio session
+        try configureAudioSession()
+
+        // Reset state
+        chunkIndex = 0
+        interimText = ""
+        currentPhraseText = ""
+        recordingDuration = 0
+        isInterrupted = false
+
+        // Start new phrase
+        try startNewPhrase()
+
+        isRecording = true
+        startTime = Date()
+        startMetricsTimer()
+
+        print("[RealtimeSpeechRecognizer] Recording started")
+    }
+
+    func stopRecording() -> TimeInterval {
+        let duration = recordingDuration
+
+        // Финализируем текущую фразу если есть
+        if let chunkURL = currentChunkURL,
+           let phraseStart = phraseStartTime,
+           !currentPhraseText.isEmpty {
+            let phraseDuration = Date().timeIntervalSince(phraseStart)
+            finishCurrentPhrase(duration: phraseDuration)
+        }
+
+        // Останавливаем все
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+        metricsTimer?.invalidate()
+        metricsTimer = nil
+
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+
+        audioFile = nil
+        currentChunkURL = nil
+
+        deactivateAudioSession()
+
+        isRecording = false
+        interimText = ""
+        currentPhraseText = ""
+        recordingDuration = 0
+        startTime = nil
+
+        print("[RealtimeSpeechRecognizer] Recording stopped, duration: \(duration)s")
+
+        return duration
+    }
+
+    func pauseRecording() {
+        guard isRecording, !isInterrupted else { return }
+
+        audioEngine.pause()
+        pauseTimer?.invalidate()
+        metricsTimer?.invalidate()
+        isInterrupted = true
+
+        print("[RealtimeSpeechRecognizer] Recording paused")
+    }
+
+    func resumeRecording() {
+        guard isRecording, isInterrupted else { return }
+
+        try? audioEngine.start()
+        startMetricsTimer()
+        resetPauseTimer()
+        isInterrupted = false
+
+        print("[RealtimeSpeechRecognizer] Recording resumed")
+    }
+
+    // MARK: - Private Methods
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+    }
+
+    private func deactivateAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func startNewPhrase() throws {
+        // Создаём новый файл для чанка
+        let chunkURL = chunksDirectory.appendingPathComponent("chunk_\(chunkIndex)_\(Date().timeIntervalSince1970).wav")
+        chunkIndex += 1
+        currentChunkURL = chunkURL
+
+        // Настраиваем запись в файл
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        audioFile = try AVAudioFile(forWriting: chunkURL, settings: recordingFormat.settings)
+
+        // Создаём новый recognition request
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        recognitionRequest?.shouldReportPartialResults = true
+
+        // Запускаем recognition task
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest!) { [weak self] result, error in
+            DispatchQueue.main.async {
+                self?.handleRecognitionResult(result, error: error)
+            }
+        }
+
+        // Убираем старый tap если есть
+        inputNode.removeTap(onBus: 0)
+
+        // Устанавливаем tap на входной узел
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            // Пишем в файл
+            try? self?.audioFile?.write(from: buffer)
+
+            // Отправляем в распознаватель
+            self?.recognitionRequest?.append(buffer)
+
+            // Обновляем уровень звука
+            DispatchQueue.main.async {
+                self?.updateAudioLevel(buffer: buffer)
+            }
+        }
+
+        // Запускаем audio engine
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        phraseStartTime = Date()
+        lastSpeechTime = Date()
+        currentPhraseText = ""
+
+        resetPauseTimer()
+
+        print("[RealtimeSpeechRecognizer] New phrase started: \(chunkURL.lastPathComponent)")
+    }
+
+    private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
+        guard let result = result else {
+            if let error = error {
+                print("[RealtimeSpeechRecognizer] Recognition error: \(error)")
+            }
+            return
+        }
+
+        let text = result.bestTranscription.formattedString
+        currentPhraseText = text
+        interimText = text
+
+        // Обновляем время последней речи
+        lastSpeechTime = Date()
+        resetPauseTimer()
+
+        // Если это финальный результат, можно что-то сделать
+        if result.isFinal {
+            print("[RealtimeSpeechRecognizer] Final result: \(text)")
+        }
+    }
+
+    private func resetPauseTimer() {
+        pauseTimer?.invalidate()
+        pauseTimer = Timer.scheduledTimer(withTimeInterval: pauseThreshold, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.handlePauseTimeout()
+            }
+        }
+    }
+
+    private func handlePauseTimeout() {
+        // Пауза 3 секунды — завершаем фразу
+        guard isRecording,
+              !isInterrupted,
+              let phraseStart = phraseStartTime,
+              !currentPhraseText.isEmpty else {
+            // Если текста нет, просто продолжаем ждать
+            resetPauseTimer()
+            return
+        }
+
+        let phraseDuration = Date().timeIntervalSince(phraseStart)
+        finishCurrentPhrase(duration: phraseDuration)
+
+        // Начинаем новую фразу
+        do {
+            // Останавливаем текущий recognition
+            recognitionTask?.cancel()
+            recognitionTask = nil
+            recognitionRequest?.endAudio()
+            recognitionRequest = nil
+
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+            audioFile = nil
+
+            // Небольшая задержка перед новой фразой
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                if self.isRecording && !self.isInterrupted {
+                    try? self.startNewPhrase()
+                }
+            }
+        }
+    }
+
+    private func finishCurrentPhrase(duration: TimeInterval) {
+        guard let chunkURL = currentChunkURL else { return }
+
+        let text = currentPhraseText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !text.isEmpty {
+            print("[RealtimeSpeechRecognizer] Phrase completed: '\(text.prefix(50))...', duration: \(duration)s")
+            onPhraseCompleted?(chunkURL, duration, text)
+        } else {
+            // Удаляем пустой чанк
+            try? fileManager.removeItem(at: chunkURL)
+        }
+
+        currentPhraseText = ""
+        interimText = ""
+        currentChunkURL = nil
+    }
+
+    private func updateAudioLevel(buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData?[0] else { return }
+        let frameLength = Int(buffer.frameLength)
+
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            sum += abs(channelData[i])
+        }
+        let average = sum / Float(frameLength)
+
+        // Нормализуем в диапазон 0-1
+        let level = min(1.0, average * 10)
+        audioLevel = level
+    }
+
+    private func startMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self, let startTime = self.startTime, !self.isInterrupted else { return }
+                self.recordingDuration = Date().timeIntervalSince(startTime)
+            }
+        }
+        if let timer = metricsTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    func clearChunksDirectory() {
+        let chunksDir = chunksDirectory
+        if let contents = try? fileManager.contentsOfDirectory(at: chunksDir, includingPropertiesForKeys: nil) {
+            for file in contents {
+                try? fileManager.removeItem(at: file)
+            }
+        }
+    }
+}
+
+// MARK: - Errors
+
+enum SpeechRecognizerError: LocalizedError {
+    case permissionDenied
+    case recognizerUnavailable
+    case recordingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied:
+            return "Требуется разрешение на микрофон и распознавание речи."
+        case .recognizerUnavailable:
+            return "Распознаватель речи недоступен."
+        case .recordingFailed:
+            return "Не удалось начать запись."
+        }
+    }
+}
