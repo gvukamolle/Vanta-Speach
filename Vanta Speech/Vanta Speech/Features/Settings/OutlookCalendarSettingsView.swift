@@ -2,7 +2,7 @@ import SwiftUI
 
 /// View настроек интеграции с Outlook Calendar
 struct OutlookCalendarSettingsView: View {
-    @StateObject private var manager = OutlookCalendarManager.shared
+    @ObservedObject private var manager = OutlookCalendarManager.shared
     @State private var showDisconnectConfirmation = false
     @State private var isLoading = false
 

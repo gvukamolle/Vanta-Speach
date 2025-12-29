@@ -8,6 +8,7 @@ struct iPadSettingsContentView: View {
     // Settings states
     @AppStorage("autoTranscribe") private var autoTranscribe = false
     @AppStorage("appTheme") private var appTheme = AppTheme.system.rawValue
+    @AppStorage("defaultRecordingMode") private var defaultRecordingMode = "standard"
     @AppStorage("confluence_connected") private var confluenceConnected = false
     @AppStorage("notion_connected") private var notionConnected = false
     @AppStorage("googledocs_connected") private var googleDocsConnected = false
@@ -172,6 +173,37 @@ struct iPadSettingsContentView: View {
             }
             .buttonStyle(.bordered)
 
+            Divider()
+                .padding(.vertical, 8)
+
+            // Настройки Real-time
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Настройки Real-time")
+                    .font(.headline)
+
+                Text("Параметры для режима Real-time транскрипции")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                NavigationLink {
+                    RealtimeModeSettingsView()
+                } label: {
+                    HStack {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                        Text("Настроить")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding()
+                .vantaGlassCard(cornerRadius: 12, shadowRadius: 0, tintOpacity: 0.15)
+            }
+            .padding()
+            .vantaGlassCard(cornerRadius: 16, shadowRadius: 0, tintOpacity: 0.15)
+
             Spacer()
         }
     }
@@ -238,6 +270,13 @@ struct iPadSettingsContentView: View {
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 12) {
+                // Outlook Calendar
+                NavigationLink {
+                    OutlookCalendarSettingsView()
+                } label: {
+                    outlookIntegrationRow
+                }
+
                 integrationRow(name: "Confluence", icon: "doc.text", isConnected: $confluenceConnected)
                 integrationRow(name: "Notion", icon: "doc.richtext", isConnected: $notionConnected)
                 integrationRow(name: "Google Docs", icon: "doc.text.fill", isConnected: $googleDocsConnected)
@@ -245,6 +284,28 @@ struct iPadSettingsContentView: View {
 
             Spacer()
         }
+    }
+
+    private var outlookIntegrationRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar")
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            Text("Outlook Calendar")
+
+            Spacer()
+
+            if OutlookCalendarManager.shared.isConnected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.tertiary)
+        }
+        .padding()
+        .vantaGlassCard(cornerRadius: 12, shadowRadius: 0, tintOpacity: 0.15)
     }
 
     private func integrationRow(name: String, icon: String, isConnected: Binding<Bool>) -> some View {

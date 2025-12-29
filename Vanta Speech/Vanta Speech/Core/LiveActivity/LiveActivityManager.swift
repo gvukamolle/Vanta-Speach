@@ -13,11 +13,6 @@ final class LiveActivityManager: ObservableObject {
     @Published private(set) var currentActivity: Activity<RecordingActivityAttributes>?
     @Published private(set) var isActivityRunning = false
 
-    // MARK: - Private Properties
-
-    private let appGroupDefaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-    private var actionObserver: Timer?
-
     // MARK: - Computed Properties
 
     var areActivitiesEnabled: Bool {
@@ -28,11 +23,6 @@ final class LiveActivityManager: ObservableObject {
 
     private init() {
         restoreActivityIfNeeded()
-        setupActionObserver()
-    }
-
-    deinit {
-        actionObserver?.invalidate()
     }
 
     // MARK: - Public API
@@ -208,44 +198,6 @@ final class LiveActivityManager: ObservableObject {
             currentActivity = existing
             isActivityRunning = true
             print("[LiveActivityManager] Restored activity: \(existing.id)")
-        }
-    }
-
-    /// Polling для действий из Live Activity кнопок (когда приложение в background)
-    private func setupActionObserver() {
-        actionObserver = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkForActions()
-            }
-        }
-    }
-
-    private func checkForActions() {
-        guard let action = appGroupDefaults?.string(forKey: AppGroupConstants.recordingActionKey) else { return }
-
-        print("[LiveActivityManager] Received action from Live Activity: \(action)")
-
-        // Очищаем action
-        appGroupDefaults?.removeObject(forKey: AppGroupConstants.recordingActionKey)
-        appGroupDefaults?.synchronize()
-
-        // Публикуем соответствующий notification
-        switch action {
-        case "pause":
-            NotificationCenter.default.post(name: .pauseRecordingFromLiveActivity, object: nil)
-        case "resume":
-            NotificationCenter.default.post(name: .resumeRecordingFromLiveActivity, object: nil)
-        case "stop":
-            NotificationCenter.default.post(name: .stopRecordingFromLiveActivity, object: nil)
-        case "transcribe":
-            print("[LiveActivityManager] Posting startTranscriptionFromLiveActivity notification")
-            NotificationCenter.default.post(name: .startTranscriptionFromLiveActivity, object: nil)
-        case "dismiss":
-            NotificationCenter.default.post(name: .dismissActivityFromLiveActivity, object: nil)
-        case "hide":
-            NotificationCenter.default.post(name: .hideActivityFromLiveActivity, object: nil)
-        default:
-            print("[LiveActivityManager] Unknown action: \(action)")
         }
     }
 }

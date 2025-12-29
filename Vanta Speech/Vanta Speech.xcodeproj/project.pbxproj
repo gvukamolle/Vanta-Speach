@@ -60,6 +60,7 @@
 				Shared/AppIntents/PresetEntity.swift,
 				Shared/AppIntents/RecordingIntents.swift,
 				Shared/AppIntents/StartRecordingIntent.swift,
+				Shared/DarwinNotificationCenter.swift,
 				Shared/RecordingActivityAttributes.swift,
 			);
 			target = AF7A0C082EFC7C3900820629 /* VantaSpeechWidgetsExtension */;

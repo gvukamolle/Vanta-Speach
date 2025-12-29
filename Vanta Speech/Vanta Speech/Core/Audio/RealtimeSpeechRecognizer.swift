@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import Combine
+import UIKit
 
 /// Распознаватель речи в реальном времени с локальной диктовкой
 /// Использует SFSpeechRecognizer для предпревью и определения пауз
@@ -52,7 +53,15 @@ final class RealtimeSpeechRecognizer: NSObject, ObservableObject {
     private let fileManager = FileManager.default
 
     /// Длительность паузы для завершения фразы (секунды)
-    private let pauseThreshold: TimeInterval = 3.0
+    /// Настраивается через UserDefaults с ключом "realtime_pauseThreshold"
+    private var pauseThreshold: TimeInterval {
+        let value = UserDefaults.standard.double(forKey: "realtime_pauseThreshold")
+        return value > 0 ? value : 3.0  // Default 3.0 секунды
+    }
+
+    /// Минимальное количество слов для отправки фразы
+    /// Защита от галлюцинаций Whisper на коротких аудио
+    private let minimumWordCount = 50
 
     // MARK: - Directories
 
@@ -133,6 +142,9 @@ final class RealtimeSpeechRecognizer: NSObject, ObservableObject {
         startTime = Date()
         startMetricsTimer()
 
+        // Запрещаем гашение экрана во время записи
+        UIApplication.shared.isIdleTimerDisabled = true
+
         print("[RealtimeSpeechRecognizer] Recording started")
     }
 
@@ -170,6 +182,9 @@ final class RealtimeSpeechRecognizer: NSObject, ObservableObject {
         currentPhraseText = ""
         recordingDuration = 0
         startTime = nil
+
+        // Разрешаем гашение экрана после остановки записи
+        UIApplication.shared.isIdleTimerDisabled = false
 
         print("[RealtimeSpeechRecognizer] Recording stopped, duration: \(duration)s")
 
@@ -295,12 +310,21 @@ final class RealtimeSpeechRecognizer: NSObject, ObservableObject {
     }
 
     private func handlePauseTimeout() {
-        // Пауза 3 секунды — завершаем фразу
+        // Пауза — проверяем условия для завершения фразы
         guard isRecording,
               !isInterrupted,
               let phraseStart = phraseStartTime,
               !currentPhraseText.isEmpty else {
             // Если текста нет, просто продолжаем ждать
+            resetPauseTimer()
+            return
+        }
+
+        // Проверяем минимальное количество слов (защита от галлюцинаций Whisper)
+        let wordCount = currentPhraseText.split(separator: " ").count
+        if wordCount < minimumWordCount {
+            // Слов недостаточно — продолжаем ждать
+            print("[RealtimeSpeechRecognizer] Word count \(wordCount) < \(minimumWordCount), waiting for more speech...")
             resetPauseTimer()
             return
         }

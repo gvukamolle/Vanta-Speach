@@ -558,7 +558,7 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     private func setupNotificationObservers() {
-        // From Shortcut - start recording
+        // From Shortcut - start recording (внутренний notification, работает в одном процессе)
         NotificationCenter.default.publisher(for: .startRecordingFromShortcut)
             .sink { [weak self] notification in
                 guard let presetId = notification.userInfo?["presetId"] as? String,
@@ -570,66 +570,41 @@ final class RecordingCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // From Live Activity - pause
-        NotificationCenter.default.publisher(for: .pauseRecordingFromLiveActivity)
-            .sink { [weak self] _ in
+        // Darwin notifications для Live Activity (межпроцессная коммуникация)
+        setupDarwinNotificationObservers()
+    }
+
+    /// Настройка Darwin notifications для получения команд из Widget Extension
+    private func setupDarwinNotificationObservers() {
+        DarwinNotificationCenter.shared.startObserving(
+            onPause: { [weak self] in
                 self?.pauseRecording()
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - resume
-        NotificationCenter.default.publisher(for: .resumeRecordingFromLiveActivity)
-            .sink { [weak self] _ in
+            },
+            onResume: { [weak self] in
                 self?.resumeRecording()
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - stop
-        NotificationCenter.default.publisher(for: .stopRecordingFromLiveActivity)
-            .sink { [weak self] _ in
+            },
+            onStop: { [weak self] in
                 Task { @MainActor in
                     _ = await self?.stopRecording()
                 }
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - start transcription
-        NotificationCenter.default.publisher(for: .startTranscriptionFromLiveActivity)
-            .sink { [weak self] _ in
-                print("[RecordingCoordinator] Received startTranscriptionFromLiveActivity notification")
+            },
+            onStartTranscription: { [weak self] in
+                print("[RecordingCoordinator] Received Darwin notification: startTranscription")
                 Task { @MainActor in
                     await self?.startTranscription()
                 }
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - open recording
-        NotificationCenter.default.publisher(for: .openRecordingFromLiveActivity)
-            .sink { notification in
-                if let recordingId = notification.userInfo?["recordingId"] as? String {
-                    print("[RecordingCoordinator] Open recording requested: \(recordingId)")
-                    // TODO: Implement navigation to recording detail
-                }
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - dismiss (Отлично - закрыть без транскрипции)
-        NotificationCenter.default.publisher(for: .dismissActivityFromLiveActivity)
-            .sink { [weak self] _ in
+            },
+            onDismiss: { [weak self] in
                 Task { @MainActor in
                     await self?.dismissActivity()
                 }
-            }
-            .store(in: &cancellables)
-
-        // From Live Activity - hide (Скрыть во время транскрипции)
-        NotificationCenter.default.publisher(for: .hideActivityFromLiveActivity)
-            .sink { [weak self] _ in
+            },
+            onHide: { [weak self] in
                 Task { @MainActor in
                     await self?.hideActivity()
                 }
             }
-            .store(in: &cancellables)
+        )
     }
 
     /// Закрыть Live Activity без транскрипции

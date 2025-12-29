@@ -17,11 +17,8 @@ struct PauseRecordingIntent: LiveActivityIntent {
         generator.prepare()
         generator.impactOccurred()
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("pause", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .pauseRecordingFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postPauseRecording()
 
         return .result()
     }
@@ -39,11 +36,8 @@ struct ResumeRecordingIntent: LiveActivityIntent {
         generator.prepare()
         generator.impactOccurred()
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("resume", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .resumeRecordingFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postResumeRecording()
 
         return .result()
     }
@@ -61,11 +55,8 @@ struct StopRecordingIntent: LiveActivityIntent {
         generator.prepare()
         generator.notificationOccurred(.warning)
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("stop", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .stopRecordingFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postStopRecording()
 
         return .result()
     }
@@ -83,11 +74,8 @@ struct StartTranscriptionIntent: LiveActivityIntent {
         generator.prepare()
         generator.impactOccurred()
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("transcribe", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .startTranscriptionFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postStartTranscription()
 
         return .result()
     }
@@ -134,11 +122,8 @@ struct DismissActivityIntent: LiveActivityIntent {
         generator.prepare()
         generator.notificationOccurred(.success)
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("dismiss", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .dismissActivityFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postDismissActivity()
 
         return .result()
     }
@@ -156,11 +141,8 @@ struct HideActivityIntent: LiveActivityIntent {
         generator.prepare()
         generator.impactOccurred()
 
-        let defaults = UserDefaults(suiteName: AppGroupConstants.suiteName)
-        defaults?.set("hide", forKey: AppGroupConstants.recordingActionKey)
-        defaults?.synchronize()
-
-        NotificationCenter.default.post(name: .hideActivityFromLiveActivity, object: nil)
+        // Darwin notification для мгновенной межпроцессной коммуникации
+        DarwinNotificationCenter.shared.postHideActivity()
 
         return .result()
     }

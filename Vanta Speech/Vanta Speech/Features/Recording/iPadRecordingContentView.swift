@@ -20,6 +20,8 @@ struct iPadRecordingContentView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
+    @AppStorage("defaultRecordingMode") private var defaultRecordingMode = "standard"
+
     private let calendar = Calendar.current
 
     private var todayRecordings: [Recording] {
@@ -32,21 +34,40 @@ struct iPadRecordingContentView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                // Левая колонка: Контролы записи
-                leftColumn
-                    .frame(width: geometry.size.width * 0.5)
+        ZStack {
+            // Градиент на самом заднем фоне
+            VantaDecorativeBackground()
+                .ignoresSafeArea()
 
-                Divider()
+            Color(.systemGroupedBackground).opacity(0.85)
+                .ignoresSafeArea()
 
-                // Правая колонка: Сегодняшние записи
-                rightColumn
-                    .frame(width: geometry.size.width * 0.5)
+            VStack(spacing: 0) {
+                // Режим записи
+                Picker("Режим", selection: $defaultRecordingMode) {
+                    Text("Обычная").tag("standard")
+                    Text("Real-time").tag("realtime")
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        // Левая колонка: Контролы записи
+                        leftColumn
+                            .frame(width: geometry.size.width * 0.5)
+
+                        Divider()
+
+                        // Правая колонка: Сегодняшние записи
+                        rightColumn
+                            .frame(width: geometry.size.width * 0.5)
+                    }
+                }
             }
         }
         .navigationTitle("Запись")
-        .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showRecordingSheet) {
             if let preset = coordinator.currentPreset {
                 ActiveRecordingSheet(preset: preset, onStop: stopRecording)
@@ -83,26 +104,20 @@ struct iPadRecordingContentView: View {
     // MARK: - Left Column (Recording Controls)
 
     private var leftColumn: some View {
-        ZStack {
-            // Decorative background
-            VantaDecorativeBackground()
-                .ignoresSafeArea()
+        VStack(spacing: 32) {
+            Spacer()
 
-            VStack(spacing: 32) {
-                Spacer()
-
-                // Active recording indicator
-                if recorder.isRecording || coordinator.isRealtimeMode {
-                    activeRecordingView
-                }
-
-                // Large microphone button area
-                microphoneSection
-
-                Spacer()
+            // Active recording indicator
+            if recorder.isRecording || coordinator.isRealtimeMode {
+                activeRecordingView
             }
-            .padding()
+
+            // Large microphone button area
+            microphoneSection
+
+            Spacer()
         }
+        .padding()
     }
 
     private var activeRecordingView: some View {
@@ -197,51 +212,39 @@ struct iPadRecordingContentView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // If not recording - show menu with presets and mode selection
+            // If not recording - show menu with preset selection
+            // Recording mode is taken from settings
             Menu {
                 ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
-                    Menu {
-                        Button {
-                            startRecordingWithPreset(preset, realtime: false)
-                        } label: {
-                            Label("Обычная запись", systemImage: "waveform")
-                        }
-
-                        Button {
-                            startRecordingWithPreset(preset, realtime: true)
-                        } label: {
-                            Label("Real-time транскрипция", systemImage: "text.badge.plus")
-                        }
+                    Button {
+                        let isRealtime = defaultRecordingMode == "realtime"
+                        startRecordingWithPreset(preset, realtime: isRealtime)
                     } label: {
                         Label(preset.displayName, systemImage: preset.icon)
                     }
                 }
             } label: {
-                recordButtonLabel
+                HStack(spacing: 12) {
+                    if recorder.isConverting {
+                        ProgressView()
+                            .tint(.primary)
+                    } else {
+                        Image(systemName: defaultRecordingMode == "realtime" ? "text.badge.plus" : "mic.fill")
+                            .font(.title2)
+                    }
+
+                    Text(defaultRecordingMode == "realtime" ? "Real-time" : "Записать")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 18)
+                .vantaGlassProminent(cornerRadius: 32)
             }
             .buttonStyle(.plain)
             .disabled(recorder.isConverting)
         }
-    }
-
-    private var recordButtonLabel: some View {
-        HStack(spacing: 12) {
-            if recorder.isConverting {
-                ProgressView()
-                    .tint(.primary)
-            } else {
-                Image(systemName: "mic.fill")
-                    .font(.title2)
-            }
-
-            Text("Записать")
-                .font(.title3)
-                .fontWeight(.semibold)
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 40)
-        .padding(.vertical, 18)
-        .vantaGlassProminent(cornerRadius: 32)
     }
 
     // MARK: - Right Column (Today's Recordings)

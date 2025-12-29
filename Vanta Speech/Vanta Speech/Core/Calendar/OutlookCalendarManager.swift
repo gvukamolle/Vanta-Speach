@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 /// Главный координатор интеграции с Outlook Calendar
 @MainActor

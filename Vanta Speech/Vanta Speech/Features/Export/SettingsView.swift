@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("autoTranscribe") private var autoTranscribe = false
     @AppStorage("appTheme") private var appTheme = AppTheme.system.rawValue
+    @AppStorage("defaultRecordingMode") private var defaultRecordingMode = "standard"
 
     // Integration states - persisted
     @AppStorage("confluence_connected") private var confluenceConnected = false
@@ -60,16 +61,16 @@ struct SettingsView: View {
                         RealtimeModeSettingsView()
                     } label: {
                         HStack {
-                            Image(systemName: "text.badge.plus")
+                            Image(systemName: "slider.horizontal.3")
                                 .foregroundStyle(.secondary)
                                 .frame(width: 24)
-                            Text("Real-time транскрипция")
+                            Text("Настройки Real-time")
                         }
                     }
                 } header: {
                     Text("Запись")
                 } footer: {
-                    Text("Real-time режим показывает транскрипцию в реальном времени, но работает только при активном приложении.")
+                    Text("Настройки для режима Real-time транскрипции.")
                 }
 
                 Section("Оформление") {
@@ -92,7 +93,18 @@ struct SettingsView: View {
                 }
 
                 Section("Интеграции") {
-                    // Outlook Calendar
+                    // Exchange Calendar (On-Premises EWS)
+                    NavigationLink {
+                        EWSCalendarSettingsView()
+                    } label: {
+                        IntegrationRow(
+                            name: "Exchange Calendar",
+                            icon: "building.2",
+                            isConnected: EWSCalendarManager.shared.isConnected
+                        )
+                    }
+
+                    // Outlook Calendar (Cloud via Graph API)
                     NavigationLink {
                         OutlookCalendarSettingsView()
                     } label: {
@@ -103,6 +115,18 @@ struct SettingsView: View {
                         )
                     }
 
+                    // Google Docs
+                    NavigationLink {
+                        GoogleDocsSettingsView()
+                    } label: {
+                        IntegrationRow(
+                            name: "Google Docs",
+                            icon: "doc.text.fill",
+                            isConnected: GoogleDocsManager.shared.isSignedIn
+                        )
+                    }
+
+                    // Confluence (placeholder)
                     NavigationLink {
                         IntegrationSettingsView(
                             service: "Confluence",
@@ -116,6 +140,7 @@ struct SettingsView: View {
                         )
                     }
 
+                    // Notion (placeholder)
                     NavigationLink {
                         IntegrationSettingsView(
                             service: "Notion",
@@ -126,19 +151,6 @@ struct SettingsView: View {
                             name: "Notion",
                             icon: "doc.richtext",
                             isConnected: notionConnected
-                        )
-                    }
-
-                    NavigationLink {
-                        IntegrationSettingsView(
-                            service: "Google Docs",
-                            isConnected: $googleDocsConnected
-                        )
-                    } label: {
-                        IntegrationRow(
-                            name: "Google Docs",
-                            icon: "doc.text.fill",
-                            isConnected: googleDocsConnected
                         )
                     }
                 }

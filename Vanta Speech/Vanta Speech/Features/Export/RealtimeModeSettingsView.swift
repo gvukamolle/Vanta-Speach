@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct RealtimeModeSettingsView: View {
-    @AppStorage("vad_silenceThreshold") private var silenceThreshold: Double = 0.08
-    @AppStorage("vad_silenceDuration") private var silenceDuration: Double = 1.5
+    @AppStorage("realtime_pauseThreshold") private var pauseThreshold: Double = 3.0
     @AppStorage("vad_minChunkDuration") private var minChunkDuration: Double = 10.0
     @AppStorage("vad_maxChunkDuration") private var maxChunkDuration: Double = 60.0
 
@@ -11,31 +10,19 @@ struct RealtimeModeSettingsView: View {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Порог тишины")
+                        Text("Пауза для завершения фразы")
                         Spacer()
-                        Text(String(format: "%.0f%%", silenceThreshold * 100))
+                        Text(String(format: "%.1f сек", pauseThreshold))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
-                    Slider(value: $silenceThreshold, in: 0.02...0.2, step: 0.01)
-                        .tint(.pinkVibrant)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Длительность паузы")
-                        Spacer()
-                        Text(String(format: "%.1f сек", silenceDuration))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(value: $silenceDuration, in: 0.5...3.0, step: 0.1)
+                    Slider(value: $pauseThreshold, in: 1.0...5.0, step: 0.5)
                         .tint(.pinkVibrant)
                 }
             } header: {
                 Text("Определение пауз")
             } footer: {
-                Text("Чанк завершается когда тишина длится дольше указанного времени. Более низкий порог = более чувствительно к тихим звукам.")
+                Text("Когда вы молчите дольше указанного времени, текущий фрагмент отправляется на транскрипцию. Меньшее значение = быстрее появляется текст, но может разбивать фразы.")
             }
 
             Section {
@@ -80,8 +67,7 @@ struct RealtimeModeSettingsView: View {
     }
 
     private func resetToDefaults() {
-        silenceThreshold = 0.08
-        silenceDuration = 1.5
+        pauseThreshold = 3.0
         minChunkDuration = 10.0
         maxChunkDuration = 60.0
     }

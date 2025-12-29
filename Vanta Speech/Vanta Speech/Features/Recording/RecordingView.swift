@@ -16,6 +16,7 @@ struct RecordingView: View {
     @State private var errorMessage = ""
 
     @StateObject private var presetSettings = PresetSettings.shared
+    @AppStorage("defaultRecordingMode") private var defaultRecordingMode = "standard"
 
     var body: some View {
         NavigationStack {
@@ -27,10 +28,12 @@ struct RecordingView: View {
                 // Main content
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Active recording banner
-                        if recorder.isRecording {
-                            activeRecordingBanner
+                        // Режим записи
+                        Picker("Режим", selection: $defaultRecordingMode) {
+                            Text("Обычная").tag("standard")
+                            Text("Real-time").tag("realtime")
                         }
+                        .pickerStyle(.segmented)
 
                         // Today's recordings
                         TodayRecordingsSection()
@@ -82,51 +85,6 @@ struct RecordingView: View {
         }
     }
 
-    // MARK: - Active Recording Banner
-
-    private var activeRecordingBanner: some View {
-        Button {
-            if coordinator.isRealtimeMode {
-                showRealtimeRecordingSheet = true
-            } else {
-                showRecordingSheet = true
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant)
-                    .frame(width: 10, height: 10)
-                    .modifier(PulseAnimation())
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Идёт запись")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    if coordinator.isRealtimeMode {
-                        Text("Real-time транскрипция")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                Text(formatTime(recorder.recordingDuration))
-                    .font(.system(.subheadline, design: .monospaced))
-                    .foregroundStyle(.secondary)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding()
-            .background((coordinator.isRealtimeMode ? Color.green : Color.pinkVibrant).opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Microphone Button
 
     @ViewBuilder
@@ -158,21 +116,13 @@ struct RecordingView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // If not recording - show menu with presets and mode selection
+            // If not recording - show menu with preset selection
+            // Recording mode is taken from settings
             Menu {
                 ForEach(presetSettings.enabledPresets, id: \.rawValue) { preset in
-                    Menu {
-                        Button {
-                            startRecordingWithPreset(preset, realtime: false)
-                        } label: {
-                            Label("Обычная запись", systemImage: "waveform")
-                        }
-
-                        Button {
-                            startRecordingWithPreset(preset, realtime: true)
-                        } label: {
-                            Label("Real-time транскрипция", systemImage: "text.badge.plus")
-                        }
+                    Button {
+                        let isRealtime = defaultRecordingMode == "realtime"
+                        startRecordingWithPreset(preset, realtime: isRealtime)
                     } label: {
                         Label(preset.displayName, systemImage: preset.icon)
                     }
@@ -183,11 +133,11 @@ struct RecordingView: View {
                         ProgressView()
                             .tint(.primary)
                     } else {
-                        Image(systemName: "mic.fill")
+                        Image(systemName: defaultRecordingMode == "realtime" ? "text.badge.plus" : "mic.fill")
                             .font(.title3)
                     }
 
-                    Text("Записать")
+                    Text(defaultRecordingMode == "realtime" ? "Real-time" : "Записать")
                         .font(.body)
                         .fontWeight(.semibold)
                 }

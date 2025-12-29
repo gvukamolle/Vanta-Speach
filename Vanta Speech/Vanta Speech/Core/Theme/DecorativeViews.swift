@@ -83,42 +83,26 @@ struct VantaRing: View {
     }
 }
 
-// MARK: - Decorative Background
+// MARK: - Decorative Background (Gradient)
 
 struct VantaDecorativeBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var opacity: Double {
-        colorScheme == .dark ? 0.8 : 1.0
+        colorScheme == .dark ? 0.15 : 0.25
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Large pink sphere (top-right)
-                VantaSphere(style: .pink, size: 180)
-                    .offset(
-                        x: geometry.size.width * 0.6,
-                        y: -40
-                    )
-                    .opacity(opacity)
-
-                // Medium blue sphere (bottom-left)
-                VantaSphere(style: .blue, size: 100)
-                    .offset(
-                        x: -30,
-                        y: geometry.size.height * 0.6
-                    )
-                    .opacity(opacity * 0.9)
-
-                // Small pink sphere
-                VantaSphere(style: .pink, size: 40)
-                    .offset(
-                        x: geometry.size.width * 0.2,
-                        y: geometry.size.height * 0.3
-                    )
-                    .opacity(opacity * 0.85)
-            }
+        ZStack {
+            // Subtle gradient from pink to blue
+            LinearGradient(
+                colors: [
+                    Color(hex: "#F9B9EB").opacity(opacity),
+                    Color(hex: "#B3E5FF").opacity(opacity * 0.8)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
         }
         .allowsHitTesting(false)
     }

@@ -59,6 +59,7 @@ struct iPadContentView: View {
                     .overlay(
                         Rectangle()
                             .fill(Color.pinkVibrant.opacity(0.05))
+                            .allowsHitTesting(false)
                     )
                     .clipShape(
                         .rect(
@@ -84,34 +85,31 @@ struct iPadContentView: View {
 
     @ViewBuilder
     private var mainContentView: some View {
-        Group {
-            if selectedRecording != nil && selectedSection != .settings {
-                // 2-колоночный layout с detail
-                NavigationSplitView {
-                    contentView
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                sidebarToggleButton
-                            }
-                        }
-                } detail: {
-                    if let recording = selectedRecording {
-                        RecordingDetailView(recording: recording)
-                            .id(recording.id)
+        NavigationStack {
+            contentView
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        sidebarToggleButton
                     }
                 }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                // Одноколоночный layout
-                NavigationStack {
-                    contentView
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                sidebarToggleButton
+        }
+        .sheet(item: $selectedRecording) { recording in
+            NavigationStack {
+                RecordingDetailView(recording: recording)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                selectedRecording = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                }
+                    }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 

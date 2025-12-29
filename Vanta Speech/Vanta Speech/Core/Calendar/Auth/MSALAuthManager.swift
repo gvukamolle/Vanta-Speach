@@ -1,4 +1,6 @@
+import Combine
 import Foundation
+import UIKit
 
 #if canImport(MSAL)
 import MSAL
