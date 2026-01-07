@@ -11,6 +11,7 @@ interface RecordingRepository {
     suspend fun saveRecording(recording: Recording)
     suspend fun updateRecording(recording: Recording)
     suspend fun deleteRecording(id: String)
+    suspend fun deleteAllRecordings()
     suspend fun updateTranscriptionResult(
         id: String,
         transcription: String,

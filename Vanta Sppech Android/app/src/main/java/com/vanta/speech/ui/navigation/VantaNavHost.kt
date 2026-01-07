@@ -2,14 +2,12 @@ package com.vanta.speech.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stream
-import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Stream
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -36,10 +34,11 @@ import com.vanta.speech.core.auth.AuthenticationManager
 import com.vanta.speech.feature.auth.LoginScreen
 import com.vanta.speech.feature.library.LibraryScreen
 import com.vanta.speech.feature.library.RecordingDetailScreen
-import com.vanta.speech.feature.realtime.RealtimeRecordingScreen
 import com.vanta.speech.feature.recording.RecordingScreen
 import com.vanta.speech.feature.settings.EWSCalendarSettingsScreen
 import com.vanta.speech.feature.settings.OutlookCalendarSettingsScreen
+import com.vanta.speech.feature.settings.PresetSettingsScreen
+import com.vanta.speech.feature.settings.RealtimeSettingsScreen
 import com.vanta.speech.feature.settings.SettingsScreen
 import com.vanta.speech.ui.theme.VantaColors
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -54,22 +53,16 @@ data class BottomNavItem(
 
 private val bottomNavItems = listOf(
     BottomNavItem(
+        screen = Screen.Library,
+        labelResId = R.string.nav_history,
+        selectedIcon = Icons.Filled.CalendarMonth,
+        unselectedIcon = Icons.Outlined.CalendarMonth
+    ),
+    BottomNavItem(
         screen = Screen.Recording,
         labelResId = R.string.nav_recording,
         selectedIcon = Icons.Filled.Mic,
         unselectedIcon = Icons.Outlined.Mic
-    ),
-    BottomNavItem(
-        screen = Screen.Realtime,
-        labelResId = R.string.nav_realtime,
-        selectedIcon = Icons.Filled.Stream,
-        unselectedIcon = Icons.Outlined.Stream
-    ),
-    BottomNavItem(
-        screen = Screen.Library,
-        labelResId = R.string.nav_library,
-        selectedIcon = Icons.Filled.Folder,
-        unselectedIcon = Icons.Outlined.Folder
     ),
     BottomNavItem(
         screen = Screen.Settings,
@@ -159,14 +152,9 @@ fun VantaNavHost(
                 )
             }
             composable(Screen.Recording.route) {
-                RecordingScreen()
-            }
-            composable(Screen.Realtime.route) {
-                RealtimeRecordingScreen(
+                RecordingScreen(
                     onRecordingCompleted = { recordingId ->
-                        navController.navigate(Screen.RecordingDetail.createRoute(recordingId)) {
-                            popUpTo(Screen.Realtime.route) { inclusive = true }
-                        }
+                        navController.navigate(Screen.RecordingDetail.createRoute(recordingId))
                     }
                 )
             }
@@ -184,6 +172,12 @@ fun VantaNavHost(
                     },
                     onNavigateToEWS = {
                         navController.navigate(Screen.EWSSettings.route)
+                    },
+                    onNavigateToPresets = {
+                        navController.navigate(Screen.PresetSettings.route)
+                    },
+                    onNavigateToRealtime = {
+                        navController.navigate(Screen.RealtimeSettings.route)
                     }
                 )
             }
@@ -195,6 +189,16 @@ fun VantaNavHost(
             composable(Screen.EWSSettings.route) {
                 EWSCalendarSettingsScreen(
                     onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.PresetSettings.route) {
+                PresetSettingsScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.RealtimeSettings.route) {
+                RealtimeSettingsScreen(
+                    onBack = { navController.popBackStack() }
                 )
             }
             composable(Screen.RecordingDetail.route) { backStackEntry ->

@@ -3,10 +3,17 @@
     <string name="app_name">Vanta Speech</string>
 
     <!-- Navigation -->
+    <string name="nav_history">История</string>
     <string name="nav_recording">Запись</string>
-    <string name="nav_realtime">Real-time</string>
-    <string name="nav_library">Библиотека</string>
     <string name="nav_settings">Настройки</string>
+
+    <!-- Recording Modes -->
+    <string name="mode_standard">Обычная</string>
+    <string name="mode_realtime">Real-time</string>
+    <string name="mode_import">Импорт</string>
+
+    <!-- Floating Button Labels (iOS style) -->
+    <string name="button_record">Записать</string>
 
     <!-- Recording -->
     <string name="recording_start">Начать запись</string>
@@ -25,6 +32,18 @@
     <!-- Library -->
     <string name="library_empty">Записей пока нет</string>
     <string name="library_today">Сегодня</string>
+    <string name="library_yesterday">Вчера</string>
+    <string name="stats_total">Всего</string>
+    <string name="stats_month">За месяц</string>
+
+    <!-- Calendar -->
+    <string name="calendar_mon">Пн</string>
+    <string name="calendar_tue">Вт</string>
+    <string name="calendar_wed">Ср</string>
+    <string name="calendar_thu">Чт</string>
+    <string name="calendar_fri">Пт</string>
+    <string name="calendar_sat">Сб</string>
+    <string name="calendar_sun">Вс</string>
 
     <!-- Transcription -->
     <string name="transcription_processing">Обработка…</string>

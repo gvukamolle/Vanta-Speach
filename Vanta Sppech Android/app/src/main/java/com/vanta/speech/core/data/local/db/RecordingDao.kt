@@ -36,6 +36,9 @@ interface RecordingDao {
     @Query("DELETE FROM recordings WHERE id = :id")
     suspend fun deleteRecordingById(id: String)
 
+    @Query("DELETE FROM recordings")
+    suspend fun deleteAllRecordings()
+
     @Query("UPDATE recordings SET isUploading = :isUploading WHERE id = :id")
     suspend fun updateUploadingStatus(id: String, isUploading: Boolean)
 

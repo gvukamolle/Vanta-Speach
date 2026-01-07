@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vanta.speech.core.audio.AudioImporter
 import com.vanta.speech.core.domain.model.Recording
+import com.vanta.speech.core.domain.model.RecordingMode
 import com.vanta.speech.core.domain.model.RecordingPreset
 import com.vanta.speech.core.domain.model.RecordingState
 import com.vanta.speech.core.domain.repository.RecordingRepository
@@ -38,6 +39,9 @@ class RecordingViewModel @Inject constructor(
 
     private val _recordingState = MutableStateFlow<RecordingState>(RecordingState.Idle)
     val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
+
+    private val _selectedMode = MutableStateFlow(RecordingMode.STANDARD)
+    val selectedMode: StateFlow<RecordingMode> = _selectedMode.asStateFlow()
 
     private val _selectedPreset = MutableStateFlow<RecordingPreset?>(null)
     val selectedPreset: StateFlow<RecordingPreset?> = _selectedPreset.asStateFlow()
@@ -104,6 +108,10 @@ class RecordingViewModel @Inject constructor(
     private fun bindToService() {
         val intent = Intent(context, RecordingService::class.java)
         context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    fun selectMode(mode: RecordingMode) {
+        _selectedMode.value = mode
     }
 
     fun selectPreset(preset: RecordingPreset) {

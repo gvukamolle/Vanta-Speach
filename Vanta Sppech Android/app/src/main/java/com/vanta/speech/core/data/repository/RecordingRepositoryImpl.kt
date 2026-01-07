@@ -53,6 +53,10 @@ class RecordingRepositoryImpl @Inject constructor(
         recordingDao.deleteRecordingById(id)
     }
 
+    override suspend fun deleteAllRecordings() {
+        recordingDao.deleteAllRecordings()
+    }
+
     override suspend fun updateTranscriptionResult(
         id: String,
         transcription: String,

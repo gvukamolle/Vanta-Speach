@@ -3,15 +3,18 @@ package com.vanta.speech.feature.library
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,29 +28,34 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vanta.speech.R
-import com.vanta.speech.ui.components.RecordingCard
+import com.vanta.speech.ui.components.DayRecordingsBottomSheet
+import com.vanta.speech.ui.components.StatCard
 import com.vanta.speech.ui.components.VantaBackground
+import com.vanta.speech.ui.components.calendar.CalendarView
 import com.vanta.speech.ui.theme.VantaColors
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
     onRecordingClick: (String) -> Unit
 ) {
-    val recordingsGrouped by viewModel.recordingsGroupedByDate.collectAsStateWithLifecycle()
+    val displayedMonth by viewModel.displayedMonth.collectAsStateWithLifecycle()
+    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+    val recordingDates by viewModel.recordingDates.collectAsStateWithLifecycle()
+    val totalRecordingsCount by viewModel.totalRecordingsCount.collectAsStateWithLifecycle()
+    val monthRecordingsCount by viewModel.monthRecordingsCount.collectAsStateWithLifecycle()
+    val recordingsForSelectedDate by viewModel.recordingsForSelectedDate.collectAsStateWithLifecycle()
 
     VantaBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 24.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             // Header
             Text(
-                text = stringResource(R.string.nav_library),
+                text = stringResource(R.string.nav_history),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = VantaColors.White,
@@ -56,12 +64,53 @@ fun LibraryScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            if (recordingsGrouped.isEmpty()) {
-                // Empty state
+            // Calendar
+            CalendarView(
+                displayedMonth = displayedMonth,
+                onMonthChange = { viewModel.setDisplayedMonth(it) },
+                selectedDate = selectedDate,
+                onDateSelected = { date ->
+                    if (recordingDates.contains(date)) {
+                        viewModel.selectDate(date)
+                    }
+                },
+                recordingDates = recordingDates,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Statistics cards
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                StatCard(
+                    title = stringResource(R.string.stats_total),
+                    value = totalRecordingsCount.toString(),
+                    icon = Icons.Default.GraphicEq,
+                    color = VantaColors.PinkVibrant,
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    title = stringResource(R.string.stats_month),
+                    value = monthRecordingsCount.toString(),
+                    icon = Icons.Default.CalendarMonth,
+                    color = VantaColors.BlueVibrant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Empty state hint
+            if (recordingDates.isEmpty()) {
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -82,52 +131,30 @@ fun LibraryScreen(
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    recordingsGrouped.forEach { group ->
-                        item {
-                            Text(
-                                text = formatDateHeader(group.date),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = VantaColors.DarkTextSecondary,
-                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp)
-                            )
-                        }
-
-                        items(group.recordings) { recording ->
-                            RecordingCard(
-                                recording = recording,
-                                onClick = { onRecordingClick(recording.id) }
-                            )
-                        }
-                    }
-
-                    // Bottom spacing
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                }
+                // Hint text
+                Text(
+                    text = "Выберите день с записями на календаре",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = VantaColors.DarkTextSecondary,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
             }
+
+            // Bottom padding
+            Spacer(modifier = Modifier.height(100.dp))
         }
     }
-}
 
-private fun formatDateHeader(date: LocalDate): String {
-    val today = LocalDate.now()
-    val yesterday = today.minusDays(1)
-
-    return when (date) {
-        today -> "Сегодня"
-        yesterday -> "Вчера"
-        else -> {
-            val formatter = DateTimeFormatter.ofPattern("d MMMM", Locale("ru"))
-            date.format(formatter)
-        }
+    // Day recordings bottom sheet
+    selectedDate?.let { date ->
+        DayRecordingsBottomSheet(
+            date = date,
+            recordings = recordingsForSelectedDate,
+            onRecordingClick = { recordingId ->
+                viewModel.clearSelectedDate()
+                onRecordingClick(recordingId)
+            },
+            onDismiss = { viewModel.clearSelectedDate() }
+        )
     }
 }
